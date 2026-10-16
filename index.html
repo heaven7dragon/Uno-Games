@@ -92,6 +92,23 @@ h1,h2,h3{line-height:1.2}
 .gl .cbox{--cw:70px;flex:none}
 .gl h3{margin:0 0 .2rem;font-size:1.1rem}
 .gl p{margin:0;line-height:1.45}
+.row{flex-wrap:wrap}
+.stiles{display:grid;grid-template-columns:repeat(2,1fr);gap:.6rem;margin:.6rem 0}
+@media (min-width:640px){.stiles{grid-template-columns:repeat(3,1fr)}}
+.stile{background:var(--panel);border:2px solid var(--line);border-radius:16px;padding:.8rem .9rem;text-align:center}
+.stile b{display:block;font-size:2.2rem;line-height:1.1}
+.stile span{color:var(--muted);font-weight:700;font-size:.95rem}
+.stile.win b{color:#2b9a4b}
+.stile.loss b{color:#c62f22}
+html[data-theme="dark"] .stile.win b{color:#5fd384}
+html[data-theme="dark"] .stile.loss b{color:#ff7a68}
+.wbar{height:22px;border-radius:11px;overflow:hidden;display:flex;background:var(--panel2);border:2px solid var(--line)}
+.wbar i{display:block;height:100%}
+.wbar .w{background:#2b9a4b}
+.wbar .l{background:#c62f22}
+.slegend{display:flex;justify-content:space-between;font-weight:700;margin-top:.3rem;font-size:.95rem}
+.smode{display:flex;justify-content:space-between;align-items:center;background:var(--panel);border:2px solid var(--line);border-radius:14px;padding:.6rem .8rem;margin-bottom:.45rem}
+.smode small{color:var(--muted);display:block}
 .prose{background:var(--panel);border:2px solid var(--line);border-radius:16px;padding:.8rem 1rem;margin-bottom:.8rem;line-height:1.5}
 .prose ul{padding-left:1.2rem;margin:.4rem 0}
 .prose li{margin:.3rem 0}
@@ -236,6 +253,7 @@ table.pts td:last-child{text-align:right;font-weight:800}
    ========================================================= */
 var LS_SET = 'unoPwa.settings.v1';
 var LS_SAVE = 'unoPwa.save.v1';
+var LS_STATS = 'unoPwa.stats.v1';
 var LIGHT = ['red', 'yellow', 'green', 'blue'];
 var DARK = ['pink', 'teal', 'orange', 'purple'];
 var HEX = { red: '#d93a2b', yellow: '#f2b705', green: '#2b9a4b', blue: '#2366c8', pink: '#e0479e', teal: '#10a0a0', orange: '#f07a10', purple: '#7a44c4', wild: '#1d1d21' };
@@ -339,6 +357,35 @@ function applySettings() {
   var m = document.querySelector('meta[name="theme-color"]');
   if (m) m.setAttribute('content', t === 'dark' ? '#0f1114' : '#f2eee5');
 }
+
+/* =========================================================
+   STATS (persist in localStorage)
+   ========================================================= */
+var STAT_KEYS = ['all', 'classic', 'nomercy', 'flip'];
+function blankStat() { return { played: 0, wins: 0, losses: 0, streak: 0, best: 0 }; }
+function loadStats() {
+  var st = {};
+  STAT_KEYS.forEach(function (k) { st[k] = blankStat(); });
+  try {
+    var o = JSON.parse(localStorage.getItem(LS_STATS) || '{}');
+    STAT_KEYS.forEach(function (k) { if (o[k]) for (var f in st[k]) if (st[k].hasOwnProperty(f) && typeof o[k][f] === 'number') st[k][f] = o[k][f]; });
+  } catch (e) {}
+  return st;
+}
+function saveStats(st) { try { localStorage.setItem(LS_STATS, JSON.stringify(st)); } catch (e) {} }
+function recordResult(mode, won) {
+  if (AUTOPLAY) return;
+  var st = loadStats();
+  ['all', mode].forEach(function (k) {
+    var r = st[k];
+    if (!r) return;
+    r.played++;
+    if (won) { r.wins++; r.streak++; if (r.streak > r.best) r.best = r.streak; }
+    else { r.losses++; r.streak = 0; }
+  });
+  saveStats(st);
+}
+function winRate(r) { return r.played ? Math.round(r.wins / r.played * 100) : 0; }
 
 /* =========================================================
    TIMERS (pausable)
@@ -1005,6 +1052,7 @@ function endRound(wi) {
   log(w.name + ' wins the round' + (G.target ? ' (+' + total + ' points)' : '') + '.');
   var over = !G.target || w.score >= G.target;
   setStatus(wi === 0 && w.human ? 'You win!' : nm(wi) + ' wins!');
+  if (over && !G.recorded) { G.recorded = true; recordResult(G.mode, wi === 0); }
   render();
   if (AUTOPLAY) { window.__uno.rounds++; window.__uno.wins[wi] = (window.__uno.wins[wi] || 0) + 1; autoNext(over); return; }
   setTimeout(function () { showResult(wi, rows, total, over); }, 600);
@@ -1315,9 +1363,15 @@ function showResult(wi, rows, total, over) {
       html += '<div style="margin:.4rem 0"><b>' + esc(p.name) + '</b> \u2014 ' + p.score + '<div class="bar"><i style="width:' + Math.min(100, p.score / G.target * 100) + '%"></i></div></div>';
     });
   }
+  if (over && !AUTOPLAY) {
+    var sa = loadStats().all;
+    html += '<p>' + (youWon ? (sa.streak > 1 ? '\uD83D\uDD25 That\u2019s <b>' + sa.streak + ' wins in a row!</b> ' : '') : '') +
+      'Overall: <b>' + sa.wins + '</b> won from <b>' + sa.played + '</b> (' + winRate(sa) + '%).</p>';
+  }
   var buttons = [];
   if (!over) buttons.push({ label: 'Next round', cls: 'primary', fn: nextRound });
   else buttons.push({ label: 'Play again', cls: 'primary', fn: newGame });
+  if (over) buttons.push({ label: '\uD83D\uDCCA Stats', fn: function () { G = null; ui.statsReturn = 'home'; show('stats'); } });
   buttons.push({ label: 'Home', fn: function () { G = null; show('home'); } });
   showModal({ title: title, html: html, buttons: buttons });
 }
@@ -1407,6 +1461,7 @@ function render() {
   if (ui.screen === 'home') app.innerHTML = renderHome();
   else if (ui.screen === 'setup') app.innerHTML = renderSetup();
   else if (ui.screen === 'rules') app.innerHTML = renderRules();
+  else if (ui.screen === 'stats') app.innerHTML = renderStats();
 }
 function renderHome() {
   var h = '<div class="screen"><div class="wrap"><div class="hero"><div class="hero-cards">' +
@@ -1421,7 +1476,7 @@ function renderHome() {
       '</span><span><b>' + MODES[k].n + '</b><span class="mode-d">' + MODES[k].d + '</span></span></button>';
   }
   h += '</div><button class="btn primary big" data-act="setup">Next: game options \u203A</button></div>';
-  h += '<div class="row"><button class="btn" data-act="rules">\uD83D\uDCD6 Rules & cards</button><button class="btn" data-act="settings">\u2699 Settings</button></div></div></div>';
+  h += '<div class="row"><button class="btn" data-act="rules">\uD83D\uDCD6 Rules & cards</button><button class="btn" data-act="stats">\uD83D\uDCCA Stats</button><button class="btn" data-act="settings">\u2699 Settings</button></div></div></div>';
   return h;
 }
 function seg(k, opts) {
@@ -1452,6 +1507,40 @@ function renderSetup() {
   }
   h += '<div class="sec"><button class="btn primary big" data-act="start">Start game</button></div></div></div>';
   return h;
+}
+
+/* ----- stats screen ----- */
+function renderStats() {
+  var st = loadStats(), tab = ui.statsTab || 'all', r = st[tab];
+  var tabs = [['all', 'All modes'], ['classic', 'Classic'], ['nomercy', 'No Mercy'], ['flip', 'Flip']];
+  var h = '<div class="screen"><div class="wrap"><div class="toprow"><button class="iconbtn" data-act="back" aria-label="Back">\u2039</button><h2>Your stats</h2></div><div class="tabs">';
+  tabs.forEach(function (t) { h += '<button class="' + (tab === t[0] ? 'on' : '') + '" data-act="stab" data-v="' + t[0] + '">' + t[1] + '</button>'; });
+  h += '</div>';
+  if (!r.played) {
+    h += '<div class="prose"><p style="margin:0">No finished games ' + (tab === 'all' ? 'yet' : 'in ' + MODES[tab].n + ' yet') + '. Your results will appear here once you finish a game.</p></div>';
+  } else {
+    h += '<div class="stiles">' +
+      '<div class="stile"><b>' + r.played + '</b><span>Games played</span></div>' +
+      '<div class="stile win"><b>' + r.wins + '</b><span>Wins</span></div>' +
+      '<div class="stile loss"><b>' + r.losses + '</b><span>Losses</span></div>' +
+      '<div class="stile"><b>' + winRate(r) + '%</b><span>Win rate</span></div>' +
+      '<div class="stile"><b>' + r.streak + '</b><span>Current streak</span></div>' +
+      '<div class="stile"><b>' + r.best + '</b><span>Best streak</span></div></div>';
+    h += '<div class="prose"><div class="wbar" role="img" aria-label="' + r.wins + ' wins, ' + r.losses + ' losses">' +
+      '<i class="w" style="width:' + (r.wins / r.played * 100) + '%"></i><i class="l" style="width:' + (r.losses / r.played * 100) + '%"></i></div>' +
+      '<div class="slegend"><span><i style="color:#2b9a4b;font-style:normal">\u25A0</i> Won ' + r.wins + '</span><span>Lost ' + r.losses + ' <i style="color:#c62f22;font-style:normal">\u25A0</i></span></div></div>';
+  }
+  if (tab === 'all') {
+    h += '<div class="sec"><h3>By mode</h3>';
+    ['classic', 'nomercy', 'flip'].forEach(function (k) {
+      var m = st[k];
+      h += '<div class="smode"><span><b>' + MODES[k].n + '</b><small>' + m.played + ' played \u00b7 best streak ' + m.best + '</small></span><b>' + (m.played ? winRate(m) + '%' : '\u2014') + '</b></div>';
+    });
+    h += '</div>';
+  }
+  h += '<p class="note">A game counts when it finishes. In 500-point games the whole match counts as one game. Games you quit part-way aren\u2019t counted. Stats are saved on this device only.</p>';
+  if (st.all.played) h += '<div class="sec"><button class="btn" data-act="stats-reset">Reset all stats</button></div>';
+  return h + '</div></div>';
 }
 
 /* ----- rules / glossary ----- */
@@ -1704,6 +1793,12 @@ function doAct(act, el) {
       if (G && G.phase === 'play' && G.players[pi].unoVuln) catchPlayer(0, pi);
       break;
     case 'quit': clearTimers(); ui.paused = false; show('home'); break;
+    case 'stats': show('stats'); break;
+    case 'stab': ui.statsTab = v; render(); break;
+    case 'stats-reset':
+      showModal({ title: 'Reset all stats?', html: '<p>This clears your games, wins, losses and streaks for every mode. It can\u2019t be undone.</p>',
+        buttons: [{ label: 'Yes, reset', cls: 'primary', fn: function () { try { localStorage.removeItem(LS_STATS); } catch (e) {} render(); toast('Stats reset'); } }, { label: 'Cancel' }] });
+      break;
   }
 }
 function init() {
